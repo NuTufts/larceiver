@@ -16,6 +16,7 @@ class ubooneDetection(torch.utils.data.Dataset):
                  num_predictions=None,                 
                  planes=[2],
                  num_workers=1,
+                 num_channels=1,
                  random_access=False,
                  return_masks=False):
         """
@@ -29,6 +30,7 @@ class ubooneDetection(torch.utils.data.Dataset):
         if num_workers<=0:
             self._num_workers = 1
         self._num_predictions = num_predictions
+        self._num_channels = num_channels
         
         self.chains = {}
         for i in range(self._num_workers):
@@ -77,6 +79,7 @@ class ubooneDetection(torch.utils.data.Dataset):
                 raise RuntimeError("Error reading entry %d"%(entry))
 
             img_v    = [ chain.image_v.at(p).tonumpy() for p in self.planes ]
+                
             annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]
 
             # check the image is OK
@@ -93,10 +96,13 @@ class ubooneDetection(torch.utils.data.Dataset):
             
             if not self.random_access:
                 entry += 1
+
+                
+        img_norm_v = [ self._normalize( img, num_channels=self._num_channels ) for img in img_v ]
             
         if len(self.planes)>1:
             target = {'image_id':entry, 'annotations':annote_v }
-            imgout = img_v
+            imgout = img_norm_v
         else:
             target = {'image_id':entry, 'annotations':annote_v[0]}
             if self._num_predictions is not None:
@@ -107,7 +113,7 @@ class ubooneDetection(torch.utils.data.Dataset):
                 else:
                     fixed_pred[:,:] = target['annotations'][:self._num_predictions,:]
                 target['annotations'] = fixed_pred
-            imgout = img_v[0]
+            imgout = img_norm_v[0]
             
         self._nloaded[workerid] += nloaded
         self._current_entry[workerid] = entry
@@ -115,6 +121,31 @@ class ubooneDetection(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.nentries
+
+    def _normalize(self, img_tensor, max_pixval=200.0, mip_peak=40.0, mip_std=20.0, num_channels=1 ):        
+        """
+        From torchvision.data readme:
+        
+          All pre-trained models expect input images normalized in the same way, 
+          i.e. mini-batches of 3-channel RGB images of shape (3 x H x W), 
+          where H and W are expected to be at least 224. 
+          The images have to be loaded in to a range of [0, 1] 
+          and then normalized using mean = [0.485, 0.456, 0.406] 
+          and std = [0.229, 0.224, 0.225]. 
+
+        However, we have greyscale images with a long tail.
+        The MIP peak is around 40 with a std of about 20, We center around this.
+        We clip at 200.
+
+        Parameters:
+          img_tensor: (H,W) tensor
+        """
+        img_tensor = np.clip( img_tensor, 0, max_pixval )
+        img_tensor -= mip_peak
+        img_tensor *= (1.0/mip_std)
+        if num_channels>1:
+            img_tensor = np.tile( img_tensor.reshape(-1), num_channels ).reshape( (num_channels, img_tensor.shape[0], img_tensor.shape[1]) )
+        return img_tensor
 
     def print_status(self):
         for i in range(self._num_workers):
@@ -128,8 +159,11 @@ if __name__ == "__main__":
     niter = 10
     num_workers = 0
     
-    test = ubooneDetection( "test_detr2d.root", random_access=True, num_workers=num_workers, num_predictions=10 )
-    loader = torch.utils.data.DataLoader(test,batch_size=64,
+    test = ubooneDetection( "test_detr2d.root", random_access=True,
+                            num_workers=num_workers,
+                            num_predictions=10,
+                            num_channels=3 )
+    loader = torch.utils.data.DataLoader(test,batch_size=1,
                                          num_workers=num_workers,
                                          persistent_workers=False)
 
@@ -137,6 +171,10 @@ if __name__ == "__main__":
     for iiter in range(niter):
         data = next(iter(loader))
         print(data[0].shape,data[1]['annotations'].shape)
+        print(" max: ", data[0].max())
+        print(" min: ", data[0].min())
+        print(" mean: ", data[0].mean())
+        print(" std: ", data[0].std())
     end = time.time()
     elapsed = end-start
     sec_per_iter = elapsed/float(niter)
