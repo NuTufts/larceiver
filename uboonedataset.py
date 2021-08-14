@@ -73,7 +73,7 @@ class ubooneDetection(torch.utils.data.Dataset):
             if current_nbytes==0:
                 raise RuntimeError("Error reading entry %d"%(entry))
 
-            # we expect arrays of shape (H,W) for the images, we expand  to (C,H,W)
+            # we expect arrays of shape (H,W) for the images, we expand  to (C=1,H,W)
             img_v    = [ np.expand_dims(chain.image_v.at(p).tonumpy(), axis=0) for p in self.planes ]
             #for img in img_v:
             #    print("img_v: ",img.shape)
@@ -163,7 +163,7 @@ class ubooneDetection(torch.utils.data.Dataset):
         We clip at 200.
 
         Parameters:
-          img_tensor: (H,W) tensor
+          img_tensor: (1,H,W) tensor
         """
         img_tensor = np.clip( img_tensor, 0, max_pixval )
         img_tensor -= mip_peak
