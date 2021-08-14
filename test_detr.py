@@ -13,7 +13,7 @@ from uboonedataset import ubooneDetection
 
 # build model
 from detr.detr import build
-from detr.util.misc import NestedTensor
+from detr.util.misc import NestedTensor,collate_fn
 
 
 model,criterion,post = build(args)
@@ -31,12 +31,13 @@ test = ubooneDetection( "test_detr2d.root", random_access=True,
                         num_channels=3 )
 loader = torch.utils.data.DataLoader(test,batch_size=batch_size,
                                      num_workers=num_workers,
+                                     collate_fn=collate_fn,
                                      persistent_workers=False)
 
-imgs, targets = next(iter(loader))
-samples = NestedTensor( imgs, None )
-print(samples)
-#print("data.shape=",data)
+samples, targets = next(iter(loader))
+print("samples: ",type(samples))
+print("samples.tensors: ",type(samples.tensors)," shape=",samples.tensors.shape)
+print("samples.mask: ",type(samples.mask)," shape=",samples.mask.shape)
 print("forward pass")
-out = model( samples )
-print("out shape: ",out)
+#out = model( samples )
+#print("out shape: ",out)

@@ -4,12 +4,7 @@ import ROOT as rt
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
-
-def uboonedetection_collate_fn(batch):
-    batch = list(zip(*batch))
-    print(batch)    
-    return tuple(batch)
-
+from detr.util.misc import NestedTensor,collate_fn
 
 class ubooneDetection(torch.utils.data.Dataset):
     def __init__(self, root_file_path,
@@ -78,8 +73,11 @@ class ubooneDetection(torch.utils.data.Dataset):
             if current_nbytes==0:
                 raise RuntimeError("Error reading entry %d"%(entry))
 
-            img_v    = [ chain.image_v.at(p).tonumpy() for p in self.planes ]                
-            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]        
+            # we expect arrays of shape (H,W) for the images, we expand  to (C,H,W)
+            img_v    = [ np.expand_dims(chain.image_v.at(p).tonumpy(), axis=0) for p in self.planes ]
+            #for img in img_v:
+            #    print("img_v: ",img.shape)
+            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]
 
             # check the image is OK
             ok = True
@@ -110,7 +108,7 @@ class ubooneDetection(torch.utils.data.Dataset):
                     planemaskimg_v = []
                     for ii in range(nmask):
                         iimask = mask[ mask[:,2]==ii ]
-                        np_mask = np.zeros( (img.shape[0],img.shape[1]), dtype=np.int )
+                        np_mask = np.zeros( (img.shape[1],img.shape[2]), dtype=np.int )
                         np_mask[ iimask[:,0], iimask[:,1] ] = 1
                         planemaskimg_v.append( np_mask )
                     maskimg_v.append(planemaskimg_v)
@@ -140,7 +138,7 @@ class ubooneDetection(torch.utils.data.Dataset):
             
         self._nloaded[workerid] += nloaded
         self._current_entry[workerid] = entry
-        return imgout, target
+        return torch.from_numpy(imgout), target
 
     def __len__(self):
         return self.nentries
@@ -167,7 +165,8 @@ class ubooneDetection(torch.utils.data.Dataset):
         img_tensor -= mip_peak
         img_tensor *= (1.0/mip_std)
         if num_channels>1:
-            img_tensor = np.tile( img_tensor.reshape(-1), num_channels ).reshape( (num_channels, img_tensor.shape[0], img_tensor.shape[1]) )
+            img_tensor = np.tile( img_tensor.reshape(-1), num_channels ).reshape( (num_channels, img_tensor.shape[1], img_tensor.shape[2]) )
+
         return img_tensor
 
     def print_status(self):
@@ -181,24 +180,26 @@ if __name__ == "__main__":
 
     niter = 10
     num_workers = 0
+    batch_size = 1
     
     test = ubooneDetection( "test_detr2d.root", random_access=True,
                             num_workers=num_workers,
                             num_predictions=10,
                             num_channels=1,
                             return_masks=True )
-    loader = torch.utils.data.DataLoader(test,batch_size=1,
+    loader = torch.utils.data.DataLoader(test,batch_size=batch_size,
                                          num_workers=num_workers,
+                                         collate_fn=collate_fn,
                                          persistent_workers=False)
 
     start = time.time()
     for iiter in range(niter):
-        data = next(iter(loader))
-        print(data[0].shape,data[1]['annotations'].shape)
-        print(" max: ", data[0].max())
-        print(" min: ", data[0].min())
-        print(" mean: ", data[0].mean())
-        print(" std: ", data[0].std())
+        img, data = next(iter(loader))
+        print(img.tensors.shape,img.mask.shape,data[0]['annotations'].shape)
+        print(" max: ", img.tensors.max())
+        print(" min: ", img.tensors.min())
+        print(" mean: ", img.tensors.mean())
+        print(" std: ", img.tensors.std())
     end = time.time()
     elapsed = end-start
     sec_per_iter = elapsed/float(niter)
