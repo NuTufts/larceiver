@@ -78,9 +78,8 @@ class ubooneDetection(torch.utils.data.Dataset):
             if current_nbytes==0:
                 raise RuntimeError("Error reading entry %d"%(entry))
 
-            img_v    = [ chain.image_v.at(p).tonumpy() for p in self.planes ]
-                
-            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]
+            img_v    = [ chain.image_v.at(p).tonumpy() for p in self.planes ]                
+            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]        
 
             # check the image is OK
             ok = True
@@ -93,18 +92,42 @@ class ubooneDetection(torch.utils.data.Dataset):
                 nboxes = bbox.shape[0]
                 if nboxes>5:
                     ok = False
-            
+                    
             if not self.random_access:
                 entry += 1
 
+            if not ok:
+                continue
+
+            # make mask images
+            if self.return_masks:
+                mask_v   = [ chain.masks_v.at(p).tonumpy() for p in self.planes ]            
+                maskimg_v = []
+                for i,p in enumerate(self.planes):
+                    mask = mask_v[i]
+                    img  = img_v[i]
+                    nmask = annote_v[i].shape[0]
+                    planemaskimg_v = []
+                    for ii in range(nmask):
+                        iimask = mask[ mask[:,2]==ii ]
+                        np_mask = np.zeros( (img.shape[0],img.shape[1]), dtype=np.int )
+                        np_mask[ iimask[:,0], iimask[:,1] ] = 1
+                        planemaskimg_v.append( np_mask )
+                    maskimg_v.append(planemaskimg_v)
+                
                 
         img_norm_v = [ self._normalize( img, num_channels=self._num_channels ) for img in img_v ]
             
         if len(self.planes)>1:
             target = {'image_id':entry, 'annotations':annote_v }
+            if self.return_masks:
+                target['masks'] = maskimg_v
             imgout = img_norm_v
         else:
-            target = {'image_id':entry, 'annotations':annote_v[0]}
+            target = {'image_id':entry, 'annotations':annote_v[0] }
+            if self.return_masks:
+                target['masks'] = maskimg_v[0]
+            
             if self._num_predictions is not None:
                 fixed_pred = np.zeros( (self._num_predictions,5) )
                 nbbox = target['annotations'].shape[0]
@@ -162,7 +185,8 @@ if __name__ == "__main__":
     test = ubooneDetection( "test_detr2d.root", random_access=True,
                             num_workers=num_workers,
                             num_predictions=10,
-                            num_channels=3 )
+                            num_channels=1,
+                            return_masks=True )
     loader = torch.utils.data.DataLoader(test,batch_size=1,
                                          num_workers=num_workers,
                                          persistent_workers=False)

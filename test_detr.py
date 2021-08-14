@@ -1,3 +1,4 @@
+import os,sys
 import torch
 from detr.detr_args import get_detr_args_parser
 from pathlib import Path
@@ -12,16 +13,15 @@ from uboonedataset import ubooneDetection
 
 # build model
 from detr.detr import build
+from detr.util.misc import NestedTensor
 
 
-model = build(args)
+model,criterion,post = build(args)
 print(model)
 
-sys.exit(0)
-
-niter = 10
+niter = 1
 num_workers = 0
-batch_size = 4
+batch_size = 1
 num_predictions = 16
 
 # model
@@ -33,11 +33,10 @@ loader = torch.utils.data.DataLoader(test,batch_size=batch_size,
                                      num_workers=num_workers,
                                      persistent_workers=False)
 
-data = next(iter(loader))
-
-#turn image into sequence
-seq = data[0].reshape( (batch_size, 512*512, 1) )
-print("seq.shape=",seq.shape)
+imgs, targets = next(iter(loader))
+samples = NestedTensor( imgs, None )
+print(samples)
+#print("data.shape=",data)
 print("forward pass")
-#out = model(seq)
-#print("out shape: ",out.shape)
+out = model( samples )
+print("out shape: ",out)
