@@ -108,10 +108,14 @@ class ubooneDetection(torch.utils.data.Dataset):
                     planemaskimg_v = []
                     for ii in range(nmask):
                         iimask = mask[ mask[:,2]==ii ]
-                        np_mask = np.zeros( (img.shape[1],img.shape[2]), dtype=np.int )
+                        np_mask = np.zeros( (img.shape[1],img.shape[2]), dtype=np.uint8 )
                         np_mask[ iimask[:,0], iimask[:,1] ] = 1
                         planemaskimg_v.append( np_mask )
-                    maskimg_v.append(planemaskimg_v)
+                    if len(planemaskimg_v)>0:
+                        maskimg = np.stack( planemaskimg_v, axis=0 )
+                    else:
+                        maskimg = np.zeros( (0,img.shape[1],img.shape[2]), dtype=np.uint8 )
+                    maskimg_v.append(maskimg)
                 
                 
         img_norm_v = [ self._normalize( img, num_channels=self._num_channels ) for img in img_v ]
@@ -195,7 +199,7 @@ if __name__ == "__main__":
     start = time.time()
     for iiter in range(niter):
         img, data = next(iter(loader))
-        print(img.tensors.shape,img.mask.shape,data[0]['annotations'].shape)
+        print(img.tensors.shape,img.mask.shape,data[0]['annotations'].shape,data[0]['masks'].shape)
         print(" max: ", img.tensors.max())
         print(" min: ", img.tensors.min())
         print(" mean: ", img.tensors.mean())
