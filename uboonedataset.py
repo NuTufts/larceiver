@@ -43,6 +43,19 @@ class ubooneDetection(torch.utils.data.Dataset):
         self._current_nbytes = [0 for i in range(self._num_workers)]
         self._nloaded        = [0 for i in range(self._num_workers)]
         self.planes = planes
+
+        # dictionary from PDG to class type
+        self.pdg2class = {-11:1,
+                          11:1,
+                          22:2,
+                          -13:3,
+                          13:4,
+                          2212:5,
+                          211:6,
+                          -211:6,
+                          2112:7}
+        self.misc_class = 8
+                          
         
 
     def __getitem__(self, idx):
@@ -63,6 +76,9 @@ class ubooneDetection(torch.utils.data.Dataset):
         ok = False
         entry = 0
         while not ok:
+            # we loop until we get an acceptable entry
+
+            # set the tree entry number, either randomly or by next entry number
             if not self.random_access:
                 entry = current
             else:
@@ -73,13 +89,14 @@ class ubooneDetection(torch.utils.data.Dataset):
             if current_nbytes==0:
                 raise RuntimeError("Error reading entry %d"%(entry))
 
-            # we expect arrays of shape (H,W) for the images, we expand  to (C=1,H,W)
+            # file stores images as arrays of shape (H,W), we expand  to (C=1,H,W)
             img_v    = [ np.expand_dims(chain.image_v.at(p).tonumpy(), axis=0) for p in self.planes ]
-            #for img in img_v:
-            #    print("img_v: ",img.shape)
-            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:5] for p in self.planes ]
+            annote_v = [ chain.bbox_v.at(p).tonumpy()[:,:4] for p in self.planes ]
+            class_v  = [ chain.pdg_v.at(p).tonumpy() for p in self.planes ]
 
             # check the image is OK
+            # - image has minimum number of pixels
+            # - only use images with <=5 boxes (simple examples, presumably)
             ok = True
             for p in range(len(img_v)):
                 img = img_v[p]
@@ -90,10 +107,12 @@ class ubooneDetection(torch.utils.data.Dataset):
                 nboxes = bbox.shape[0]
                 if nboxes>5:
                     ok = False
-                    
+
+            # if reading file sequentially, iterate entry number
             if not self.random_access:
                 entry += 1
 
+            # if fails check, go back to beginning and try again
             if not ok:
                 continue
 
@@ -116,29 +135,45 @@ class ubooneDetection(torch.utils.data.Dataset):
                     else:
                         maskimg = np.zeros( (0,img.shape[1],img.shape[2]), dtype=np.uint8 )
                     maskimg_v.append(maskimg)
+
+            # convert pdg into class codes
+            for p,pdg in enumerate(class_v):
+                for i in range(pdg.shape[0]):
+                    if pdg[i] in self.pdg2class:
+                        pdg[i] = self.pdg2class[pdg[i]]
+                    else:
+                        pdg[i] = self.misc_class
                 
-                
+        # we found a good entry
+
+        # normalize the image
         img_norm_v = [ self._normalize( img, num_channels=self._num_channels ) for img in img_v ]
             
         if len(self.planes)>1:
-            target = {'image_id':entry, 'annotations':annote_v }
+            raise RuntimeError("Not fully implemented")
+            target = {'image_id':np.array([entry],dtype=np.long), 'boxes':annote_v }
             if self.return_masks:
                 target['masks'] = maskimg_v
             imgout = img_norm_v
         else:
-            target = {'image_id':entry, 'annotations':annote_v[0] }
+            # single image returned
+            target = {'image_id':np.array([entry],dtype=np.long), 'boxes':annote_v[0], 'labels':class_v[0].astype(np.long) }
             if self.return_masks:
                 target['masks'] = maskimg_v[0]
             
             if self._num_predictions is not None:
-                fixed_pred = np.zeros( (self._num_predictions,5) )
-                nbbox = target['annotations'].shape[0]
+                fixed_pred = np.zeros( (self._num_predictions,4), dtype=np.float32 )
+                nbbox = target['boxes'].shape[0]
                 if nbbox<self._num_predictions:
-                    fixed_pred[:nbbox,:] = target['annotations'][:,:]
+                    fixed_pred[:nbbox,:] = target['boxes'][:,:]
                 else:
-                    fixed_pred[:,:] = target['annotations'][:self._num_predictions,:]
-                target['annotations'] = fixed_pred
+                    fixed_pred[:,:] = target['boxes'][:self._num_predictions,:]
+                target['boxes'] = fixed_pred
             imgout = img_norm_v[0]
+
+            for name,arr in target.items():
+                target[name] = torch.from_numpy(arr)
+        
             
         self._nloaded[workerid] += nloaded
         self._current_entry[workerid] = entry
@@ -184,11 +219,11 @@ if __name__ == "__main__":
 
     niter = 10
     num_workers = 0
-    batch_size = 1
+    batch_size = 4
     
     test = ubooneDetection( "test_detr2d.root", random_access=True,
                             num_workers=num_workers,
-                            num_predictions=10,
+                            num_predictions=None,
                             num_channels=1,
                             return_masks=True )
     loader = torch.utils.data.DataLoader(test,batch_size=batch_size,
@@ -199,7 +234,13 @@ if __name__ == "__main__":
     start = time.time()
     for iiter in range(niter):
         img, data = next(iter(loader))
-        print(img.tensors.shape,img.mask.shape,data[0]['annotations'].shape,data[0]['masks'].shape)
+        print("ITER[%d]"%(iiter))
+        print(" len(data)=",len(data))
+        print(" img.shape=",img.tensors.shape," ",img.tensors.dtype)
+        print(" mask.shape=",img.mask.shape)
+        print(" data[0][boxes]=",data[0]['boxes'].shape,data[0]['boxes'].dtype)
+        print(" data[0]['masks']=",data[0]['masks'].shape)
+        print(" data[0]['labels']=",data[0]['labels'].shape,data[0]['labels'].dtype,data[0]['labels'])
         print(" max: ", img.tensors.max())
         print(" min: ", img.tensors.min())
         print(" mean: ", img.tensors.mean())
