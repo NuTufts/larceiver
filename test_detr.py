@@ -15,9 +15,14 @@ from uboonedataset import ubooneDetection
 from detr.detr import build
 from detr.util.misc import NestedTensor,collate_fn
 
+# device
+print("device: ",args.device)
+device = torch.device(args.device)
 
 model,criterion,post = build(args)
 print(model)
+model.to(device)
+criterion.to(device)
 
 niter = 1
 num_workers = 0
@@ -36,17 +41,18 @@ loader = torch.utils.data.DataLoader(test,batch_size=batch_size,
 
 # TEST FORWARD PASS
 samples, targets = next(iter(loader))
+samples.tensors = samples.tensors.to(device)
+samples.mask    = samples.mask.to(device)
+
 print("samples: ",type(samples))
-print("samples.tensors: ",type(samples.tensors)," shape=",samples.tensors.shape)
-print("samples.mask: ",type(samples.mask)," shape=",samples.mask.shape)
+print("samples.tensors: ",type(samples.tensors)," shape=",samples.tensors.shape,samples.tensors.device)
+print("samples.mask: ",type(samples.mask)," shape=",samples.mask.shape,samples.mask.device)
 print("forward pass")
 outputs = model( samples )
 print("out shape: ",outputs)
 
 ## TEST LOSS
 print("boxes: ",targets[0]['boxes'].dtype)
-print("device: ",args.device)
-device = torch.device(args.device)
 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 loss_dict = criterion(outputs, targets)
 print("loss dict: ",loss_dict)
